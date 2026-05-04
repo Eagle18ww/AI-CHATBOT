@@ -235,8 +235,10 @@ body{
   font-family:var(--mono);padding:0 4px;
 }
 .msg.user .meta{justify-content:flex-end}
-.tts-btn{background:none;border:none;cursor:pointer;color:var(--muted);padding:0;transition:color 0.15s}
+.tts-btn,.copy-btn{background:none;border:none;cursor:pointer;color:var(--muted);padding:0;transition:color 0.15s}
 .tts-btn:hover,.tts-btn.playing{color:var(--cyan)}
+.copy-btn:hover{color:var(--green)}
+.copy-btn.copied{color:var(--green)}
 
 /* Typing */
 .typing{display:flex;align-items:center;gap:5px;padding:4px 0}
@@ -262,6 +264,7 @@ body{
   border-radius:20px;
   padding:13px 14px;
   transition:border-color 0.25s,box-shadow 0.25s;
+  cursor:text;
 }
 .ibox:focus-within{
   border-color:rgba(0,229,255,0.45);
@@ -271,6 +274,7 @@ body{
   flex:1;background:none;border:none;outline:none;
   color:var(--text);font-family:var(--font);font-size:14px;
   resize:none;min-height:26px;max-height:150px;line-height:1.65;
+  cursor:text;pointer-events:auto;
 }
 .ibox textarea::placeholder{color:var(--muted)}
 
@@ -586,7 +590,7 @@ body{
 
   <!-- INPUT AREA -->
   <div class="input-wrap">
-    <div class="ibox">
+    <div class="ibox" onclick="document.getElementById('msgInput').focus()">
       <textarea id="msgInput" rows="1"
         placeholder="Message JARVIS…  any language, any question ✦"
         oninput="autoResize(this)"
@@ -622,7 +626,7 @@ body{
 <div class="sb-preloader" id="preloader">
     <div class="sb-branding-wrapper">
         <div class="sb-logo-glyph">JARVIS AI </div>
-        <h1 class="sb-brand-name">Your Perosnal AI Assistant</h1>
+        <h1 class="sb-brand-name">Your Personal AI Assistant</h1>
         <p class="sb-tagline">Developed By <span>Shaurya Barnwal</span></p>
     </div>
 </div>
@@ -638,7 +642,13 @@ let recognition = null;
 let isRecording = false;
 let currentAudio = null;
 
-const SYSTEM_PROMPT = `You are JARVIS, a helpful and intelligent assistant powered by Sarvam AI — India's multilingual AI platform. You support 22+ Indian languages. Always respond in the same language the user writes in. Be concise, clear, friendly, and culturally aware. Never show your internal thinking or reasoning — only output the final clean answer.`;
+const SYSTEM_PROMPT = `You are JARVIS, a helpful and intelligent AI assistant powered by Sarvam AI — India's multilingual AI platform. You were created and developed by Shaurya Barnwal as a college project.
+
+STRICT RULES YOU MUST FOLLOW:
+1. LANGUAGE: You MUST reply in the EXACT same language the user writes in. If user writes in Hindi → reply fully in Hindi. If English → reply in English. If Tamil → reply in Tamil. NEVER switch languages mid-response or mix languages unless the user themselves mixed them.
+2. IDENTITY: If anyone asks "who made you", "who developed you", "who created you", "who is your developer", "aapko kisne banaya" or any similar question — always answer: "I was developed by Shaurya Barnwal, a college student, as part of his AI project powered by Sarvam AI."
+3. OUTPUT: Never show your internal thinking, reasoning steps, or raw text. Only output the final clean answer. No preamble like "Okay, the user asked..." or "Let me think...".
+4. Be concise, clear, friendly, and culturally aware of Indian context.`;
 
 /* INIT */
 window.addEventListener('DOMContentLoaded', () => {
@@ -690,17 +700,25 @@ function renderMessage(role, text, animate = true) {
   const time = new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
   const av = role === 'bot' ? 'AI' : 'ME';
   const html = formatText(text);
+  const uid = 'msg_' + Date.now() + Math.random().toString(36).slice(2,6);
 
   wrap.innerHTML = `
     <div class="av ${role}">${av}</div>
     <div class="bwrap">
-      <div class="bbl">${html}</div>
+      <div class="bbl" id="${uid}">${html}</div>
       <div class="meta">
         ${time}
-        ${role === 'bot' ? `<button class="tts-btn" title="Listen" onclick="speakText(this, ${JSON.stringify(text)})">
+        ${role === 'bot' ? `
+        <button class="tts-btn" title="Listen" onclick="speakText(this, ${JSON.stringify(text)})">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
             <path d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>
+          </svg>
+        </button>
+        <button class="copy-btn" title="Copy" onclick="copyMsg(this, '${uid}')">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <rect x="9" y="9" width="13" height="13" rx="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
           </svg>
         </button>` : ''}
       </div>
@@ -758,8 +776,12 @@ async function sendMessage() {
     }
     const data = await resp.json();
     let reply = data.choices?.[0]?.message?.content || '(No response)';
+    // Strip <think>...</think> blocks
     reply = reply.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-    reply = reply.replace(/^\\n?Okay,[\s\S]*?\n\n/i, '').trim();
+    // Strip raw internal monologue leaks like \nOkay, the user... or \\n patterns
+    reply = reply.replace(/^(\\n)*\s*(Okay|Alright|Let me|So,|The user)[^\n]*\n+/i, '').trim();
+    // Strip leftover escaped newlines at start
+    reply = reply.replace(/^(\\n)+/, '').trim();
 
     history.push({ role:'assistant', content:reply });
     if (history.length > 30) history = history.slice(-30);
@@ -863,6 +885,19 @@ function clearChat() {
       </div>
     </div>`;
   showToast('New conversation started ✦');
+}
+function copyMsg(btn, uid) {
+  const el = document.getElementById(uid);
+  if (!el) return;
+  const text = el.innerText || el.textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.classList.add('copied');
+    btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+    setTimeout(() => {
+      btn.classList.remove('copied');
+      btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+    }, 2000);
+  }).catch(() => showToast('Copy failed'));
 }
 function showToast(msg) {
   const t = document.getElementById('toast');
